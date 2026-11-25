@@ -1,107 +1,73 @@
 pipeline {
     agent any
-    environment {
-        NEXUS_URL = 'http://localhost:8081/repository/python-release/Release.zip'
-        NEXUS_USER = 'admin'
-        NEXUS_PASSWORD = 'VOTRE_MOT_DE_PASSE'
-    }
     stages {
-        stage('Nettoyage du Workspace') {
+        stage('Nettoyage Workspace') {
             steps {
                 deleteDir()
             }
         }
-        stage('Téléchargement de la Release') {
+        stage('Clonage') {
+            steps {
+                git branch: 'main',
+                    url: 'https://github.com/AmineBounja/CI_Project.git'
+            }
+        }
+        stage('Vérification Python') {
+            steps {
+                bat 'python --version'
+                bat 'python -m pip --version'
+            }
+        }
+        stage('Installation des dépendances') {
+            steps {
+                bat 'python -m pip install -r requirements.txt'
+            }
+        }
+        stage('Analyse qualité du code (Pylint)') {
+            steps {
+                bat 'python -m pylint calculator.py || exit /b 0'
+            }
+        }
+        stage('Tests unitaires') {
+            steps {
+                bat 'python -m pytest --ignore=Release'
+            }
+        }
+        stage('Création de l artefact') {
             steps {
                 bat '''
-                curl -u %NEXUS_USER%:%NEXUS_PASSWORD% ^
-                -o Release.zip ^
-                %NEXUS_URL%
+                if exist Release rmdir /S /Q Release
+                if exist Release.zip del Release.zip
+                mkdir Release
+                copy calculator.py Release
+                copy test_calculator.py Release
+                copy requirements.txt Release
+                powershell Compress-Archive -Path Release\\* -DestinationPath Release.zip -Force
                 '''
             }
         }
-        stage('Vérification du téléchargement') {
+        stage('Publication de l artefact') {
             steps {
                 bat '''
-                if not exist Release.zip (
-                    echo ERREUR : Release.zip introuvable
-                    exit /b 1
-                )
-                dir
-                '''
-            }
-        }
-        stage('Décompression de la Release') {
-            steps {
-                bat '''
-                powershell -Command "Expand-Archive -Path Release.zip -DestinationPath Release -Force"
-                '''
-            }
-        }
-        stage('Vérification de la Release') {
-            steps {
-                bat '''
-                if not exist Release (
-                    echo ERREUR : dossier Release introuvable
-                    exit /b 1
-                )
-                dir Release
-                '''
-            }
-        }
-        stage('Déploiement DEV') {
-            steps {
-                bat '''
-                if not exist C:\\DEV mkdir C:\\DEV
-                xcopy Release C:\\DEV /E /I /Y
-                '''
-            }
-        }
-        stage('Vérification DEV') {
-            steps {
-                bat '''
-                echo ===== CONTENU DEV =====
-                dir C:\\DEV
-                if exist C:\\DEV\\calculator.py (
-                    python C:\\DEV\\calculator.py
-                )
-                '''
-            }
-        }
-        stage('Déploiement TEST') {
-            steps {
-                bat '''
-                if not exist C:\\TEST mkdir C:\\TEST
-                xcopy Release C:\\TEST /E /I /Y
-                '''
-            }
-        }
-        stage('Tests fonctionnels') {
-            steps {
-                bat '''
-                if exist C:\\TEST\\test_calculator.py (
-                    python C:\\TEST\\test_calculator.py
-                ) else (
-                    echo Aucun test fonctionnel trouve.
-                )
+                curl -v ^
+                -u admin:aminebounja ^
+                --upload-file Release.zip ^
+                http://localhost:8081/repository/python-release/Release.zip
                 '''
             }
         }
     }
     post {
+        always {
+            echo '================================'
+            echo 'Pipeline terminé'
+            echo '================================'
+        }
         success {
-            echo '===================================='
-            echo 'Déploiement terminé avec succès.'
-            echo '===================================='
+            echo 'BUILD SUCCESS'
         }
         failure {
-            echo '===================================='
-            echo 'Le pipeline a échoué.'
-            echo 'Vérifier les logs Jenkins.'
-            echo '===================================='
-        }
-        always {
-            archiveArtifacts artifacts: 'Release.zip', fingerprint: true
+            echo 'BUILD FAILED'
         }
     }
 }
